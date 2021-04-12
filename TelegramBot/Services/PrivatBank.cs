@@ -65,7 +65,7 @@ namespace TestConsole.Services
 
         public bool IHaveExchangeRate()
         {
-            return _Responce.ExchangeRate.Count > 0;
+            return _Responce.ExchangeRate != null && _Responce.ExchangeRate.Count > 0;
         }
 
         public string GetExchangeRate()

@@ -2,6 +2,7 @@
 using System.Configuration;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Args;
@@ -19,19 +20,27 @@ namespace TelegramBot
         const string IncorrectInput = "Sorry, but the data entered is incorrect. Please try something like 31.12.2014 - EUR";
         const string HelloText = "I can help you find out what exchange rates used to be.\nSelect date and currency. For example 31.12.2014 - EUR";
 
-        public void Run()
+        private static readonly AutoResetEvent _closingEvent = new AutoResetEvent(false);
+
+        public async Task RunAsync()
         {
             botClient = new TelegramBotClient(ConfigurationManager.AppSettings.Get("Token")) 
                 { Timeout = TimeSpan.FromSeconds(Int32.Parse(ConfigurationManager.AppSettings.Get("BotTimeout"))) };
 
-            var me = botClient.GetMeAsync().Result;
+            var me = await botClient.GetMeAsync();
             Console.WriteLine($"User {me.Id} - {me.FirstName} was launched at {DateTime.Now}.");
 
             botClient.OnMessage += Bot_OnMessage;
             botClient.StartReceiving();
 
-            Console.WriteLine("Press any key to exit");
-            Console.ReadKey();
+            Console.WriteLine("Press Ctrl + C to cancel!");
+            //CancelKey need to run docker without "tail -f /dev/null" parameter
+            Console.CancelKeyPress += ((s, a) =>
+            {
+                Console.WriteLine("Bye!");
+                _closingEvent.Set();
+            });
+            _closingEvent.WaitOne();
 
             botClient.StopReceiving();
         }
@@ -84,7 +93,10 @@ namespace TelegramBot
         {
             var args = e.Message.Text.Split("-", StringSplitOptions.RemoveEmptyEntries);
 
-            args[0] = DateTime.Now.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
+            if(DateTime.TryParse(args[0], out DateTime t))
+                args[0] = t.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
+            else
+                args[0] = DateTime.Now.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
 
             if (args.Length > 1 && args[1] is string)
                 args[1] = GetLetterString(args[1]).ToUpper();
