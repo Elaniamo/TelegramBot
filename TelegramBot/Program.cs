@@ -1,11 +1,13 @@
-﻿namespace TelegramBot
+﻿using System.Threading.Tasks;
+
+namespace TelegramBot
 {
     class Program
     {
-        static void Main()
+        static async Task Main()
         {
             var Bot = new Bot();
-            Bot.Run();
+            await Bot.RunAsync();
         }
     }
 }

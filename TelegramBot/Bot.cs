@@ -1,7 +1,9 @@
-﻿using System;
+﻿using StackExchange.Redis;
+using System;
 using System.Configuration;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Args;
@@ -19,19 +21,31 @@ namespace TelegramBot
         const string IncorrectInput = "Sorry, but the data entered is incorrect. Please try something like 31.12.2014 - EUR";
         const string HelloText = "I can help you find out what exchange rates used to be.\nSelect date and currency. For example 31.12.2014 - EUR";
 
-        public void Run()
+        private static readonly AutoResetEvent _closingEvent = new AutoResetEvent(false);
+        private IDatabase cache;
+
+        public async Task RunAsync()
         {
+            ConnectionMultiplexer redis = ConnectionMultiplexer.Connect("redis"); 
+            cache = redis.GetDatabase();
+
             botClient = new TelegramBotClient(ConfigurationManager.AppSettings.Get("Token")) 
                 { Timeout = TimeSpan.FromSeconds(Int32.Parse(ConfigurationManager.AppSettings.Get("BotTimeout"))) };
 
-            var me = botClient.GetMeAsync().Result;
+            var me = await botClient.GetMeAsync();
             Console.WriteLine($"User {me.Id} - {me.FirstName} was launched at {DateTime.Now}.");
 
             botClient.OnMessage += Bot_OnMessage;
             botClient.StartReceiving();
 
-            Console.WriteLine("Press any key to exit");
-            Console.ReadKey();
+            Console.WriteLine("Press Ctrl + C to cancel!");
+            //CancelKey need to run docker without "tail -f /dev/null" parameter
+            Console.CancelKeyPress += ((s, a) =>
+            {
+                Console.WriteLine("Bye!");
+                _closingEvent.Set();
+            });
+            _closingEvent.WaitOne();
 
             botClient.StopReceiving();
         }
@@ -51,10 +65,10 @@ namespace TelegramBot
             var FormattedRequest = GetFormattedRequest(e);
             if (GetValidation(FormattedRequest))
             {
-                var RequestApiPB = new PrivatBank(FormattedRequest[0], FormattedRequest[1]);
-                if (RequestApiPB.IHaveExchangeRate())
+
+                var ExchangeRate = FindExchangeRate(FormattedRequest);
+                if (!string.IsNullOrEmpty(ExchangeRate))
                 {
-                    var ExchangeRate = RequestApiPB.GetExchangeRate();
                     await botClient.SendTextMessageAsync(chatId: e.Message.Chat, text: ExchangeRate);
                     return;
                 }
@@ -79,12 +93,31 @@ namespace TelegramBot
         {
             await botClient.SendTextMessageAsync(chatId: e.Message.Chat, text: HelloText);
         }
+        string FindExchangeRate(string[] FormattedRequest)
+        {
+            string Key = String.Join(" ", FormattedRequest);
 
+            if (cache.KeyExists(Key))
+                return cache.StringGet(Key);
+
+            var PrivatBank = new PrivatBank(FormattedRequest[0], FormattedRequest[1]);
+            if (PrivatBank.IHaveExchangeRate())
+            {
+                var ExchangeRatePB = PrivatBank.GetExchangeRate();
+                cache.StringSet(Key, ExchangeRatePB);
+                return ExchangeRatePB;
+            }
+
+        return string.Empty;
+        }
         string[] GetFormattedRequest(MessageEventArgs e)
         {
             var args = e.Message.Text.Split("-", StringSplitOptions.RemoveEmptyEntries);
 
-            args[0] = DateTime.Now.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
+            if(DateTime.TryParse(args[0], out DateTime t))
+                args[0] = t.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
+            else
+                args[0] = DateTime.Now.ToString(CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.ShortDatePattern);
 
             if (args.Length > 1 && args[1] is string)
                 args[1] = GetLetterString(args[1]).ToUpper();

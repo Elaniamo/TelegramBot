@@ -1,0 +1,22 @@
+version: '3.4'
+
+services:
+  redis:
+    image: redis
+    volumes:
+    - .data:/data
+    ports:
+    - 6379:6379
+  telegrambot:
+    image: sfgl7755/tg-bot
+    build:
+      context: .
+      dockerfile: TelegramBot/Dockerfile
+    links:
+        - redis
+    environment:
+        - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+        - TZ=Europe/Kiev
+        - LANG=ru_UA.UTF-8
+        - LANGUAGE=ru_UA.UTF-8
+        - LC_ALL=ru_UA.UTF-8
